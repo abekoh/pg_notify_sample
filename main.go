@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -109,7 +110,7 @@ func serve() error {
 }
 
 func serveWebSocket(w http.ResponseWriter, r *http.Request) {
-	roomIDStr := r.URL.Query().Get("room_id")
+	roomIDStr := strings.ToLower(r.URL.Query().Get("room_id"))
 	if err := uuid.Validate(roomIDStr); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = fmt.Fprintf(w, "invalid room_id: %v", err)
