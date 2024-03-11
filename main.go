@@ -135,7 +135,7 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 	receiveCh := make(chan MessageID)
 	registerCh <- RegisterRequest{RoomID: roomID, ClientID: clientID, Ch: receiveCh}
 
-	ctx, cancel := context.WithCancel(r.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 
 	go func() {
 		defer func() {
@@ -154,7 +154,7 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			slog.Info("received message", "message", string(msg))
+			slog.Debug("received message", "message", string(msg))
 
 			var data any
 			if err := json.Unmarshal(msg, &data); err != nil {
@@ -205,7 +205,7 @@ func listenAndNotify() error {
 	notifyCh := make(chan NewEventsPayload)
 	listener.Handle(notifyChannel, pgxlisten.HandlerFunc(
 		func(ctx context.Context, notification *pgconn.Notification, conn *pgx.Conn) error {
-			slog.Info("received notification", "payload", notification.Payload)
+			slog.Debug("received notification", "payload", notification.Payload)
 			var payload NewEventsPayload
 			if err := json.Unmarshal([]byte(notification.Payload), &payload); err != nil {
 				return fmt.Errorf("unmarshal payload: %w", err)
