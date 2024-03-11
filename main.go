@@ -28,8 +28,8 @@ type (
 		Ch       chan<- MessageID
 	}
 	NewEventsPayload struct {
-		ID       string `json:"id"`
-		ClientID string `json:"client_id"`
+		ID       MessageID `json:"id"`
+		ClientID ClientID  `json:"client_id"`
 	}
 )
 
@@ -202,8 +202,8 @@ func listenAndNotify() error {
 			case payload := <-notifyCh:
 				slog.Info("notifying clients", "payload", payload)
 				for clientID, ch := range clientMap {
-					if payload.ClientID != string(clientID) {
-						ch <- MessageID(payload.ID)
+					if payload.ClientID != clientID {
+						ch <- payload.ID
 					}
 				}
 			case registerReq := <-registerCh:
