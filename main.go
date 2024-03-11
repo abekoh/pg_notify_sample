@@ -27,6 +27,10 @@ type (
 		ClientID ClientID
 		Ch       chan<- MessageID
 	}
+	NewEventsPayload struct {
+		ID       string `json:"id"`
+		ClientID string `json:"client_id"`
+	}
 )
 
 var (
@@ -73,7 +77,7 @@ created_at timestamp with time zone DEFAULT now()
 	if _, err := db.Exec(ctx, `CREATE OR REPLACE FUNCTION notify_event() RETURNS TRIGGER AS $$
 DECLARE
 BEGIN
-  PERFORM pg_notify('`+notifyChannel+`', NEW.id::text);
+  PERFORM pg_notify('`+notifyChannel+`', JSON_BUILD_OBJECT('id', NEW.id, 'client_id', NEW.client_id)::text);
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql`); err != nil {
@@ -104,7 +108,10 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 		slog.Error("failed to upgrade connection", "error", err)
 		return
 	}
-	slog.Info("client connected", "remote_addr", r.RemoteAddr)
+
+	clientID := ClientID(uuid.NewString())
+	slog.Info("client connected", "remote_addr", r.RemoteAddr, "client_id", clientID)
+
 	go func() {
 		defer conn.Close()
 		for {
@@ -124,15 +131,14 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			if _, err := db.Exec(context.Background(), `INSERT INTO events (id, message)
-VALUES ($1, $2)`, uuid.NewString(), msg); err != nil {
+			if _, err := db.Exec(context.Background(), `INSERT INTO events (id, client_id, message)
+VALUES ($1, $2, $3)`, uuid.NewString(), clientID, msg); err != nil {
 				slog.Error("failed to insert event", "error", err)
 				continue
 			}
 		}
 	}()
 	go func() {
-		clientID := ClientID(uuid.NewString())
 		receiveCh := make(chan MessageID)
 		registerCh <- RegisterRequest{ClientID: clientID, Ch: receiveCh}
 		defer func() {
@@ -164,11 +170,15 @@ func listenAndNotify() error {
 			return c.Conn(), nil
 		},
 	}
-	notifyCh := make(chan MessageID)
+	notifyCh := make(chan NewEventsPayload)
 	listener.Handle(notifyChannel, pgxlisten.HandlerFunc(
 		func(ctx context.Context, notification *pgconn.Notification, conn *pgx.Conn) error {
 			slog.Info("received notification", "payload", notification.Payload)
-			notifyCh <- MessageID(notification.Payload)
+			var payload NewEventsPayload
+			if err := json.Unmarshal([]byte(notification.Payload), &payload); err != nil {
+				return fmt.Errorf("unmarshal payload: %w", err)
+			}
+			notifyCh <- payload
 			return nil
 		}),
 	)
@@ -184,10 +194,12 @@ func listenAndNotify() error {
 	go func() {
 		for {
 			select {
-			case messageID := <-notifyCh:
-				slog.Info("broadcasting message", "message_id", messageID)
-				for _, ch := range clientMap {
-					ch <- messageID
+			case payload := <-notifyCh:
+				slog.Info("notifying clients", "payload", payload)
+				for clientID, ch := range clientMap {
+					if payload.ClientID != string(clientID) {
+						ch <- MessageID(payload.ID)
+					}
 				}
 			case registerReq := <-registerCh:
 				slog.Info("client registered", "client_id", registerReq.ClientID)
