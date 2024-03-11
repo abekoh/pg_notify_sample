@@ -10,12 +10,26 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgxlisten"
+)
+
+type (
+	ClientID        string
+	MessageID       string
+	RegisterRequest struct {
+		ClientID ClientID
+		Ch       chan<- MessageID
+	}
 )
 
 var (
-	db       *pgxpool.Pool
-	upgrader = websocket.Upgrader{}
+	db           *pgxpool.Pool
+	upgrader     = websocket.Upgrader{}
+	registerCh   = make(chan RegisterRequest)
+	unregisterCh = make(chan ClientID)
 )
 
 func main() {
@@ -30,6 +44,8 @@ func main() {
 		slog.Error("failed to migrate database", "error", err)
 		os.Exit(1)
 	}
+
+	broadcast()
 
 	if err := serve(); err != nil {
 		slog.Error("failed to serve", "error", err)
@@ -104,6 +120,66 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 VALUES ($1, $2)`, uuid.NewString(), msg); err != nil {
 				slog.Error("failed to insert event", "error", err)
 				continue
+			}
+		}
+	}()
+	go func() {
+		clientID := ClientID(uuid.NewString())
+		receiveCh := make(chan MessageID)
+		registerCh <- RegisterRequest{ClientID: clientID, Ch: receiveCh}
+		defer func() {
+			unregisterCh <- clientID
+			close(receiveCh)
+		}()
+		for {
+			messageID := <-receiveCh
+			var msg json.RawMessage
+			if err := db.QueryRow(context.Background(), `SELECT message FROM events WHERE id = $1`, messageID).Scan(&msg); err != nil {
+				slog.Error("failed to query event", "error", err)
+				continue
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				slog.Error("failed to write message", "error", err)
+				break
+			}
+		}
+	}()
+}
+
+func broadcast() {
+	listener := &pgxlisten.Listener{
+		Connect: func(ctx context.Context) (*pgx.Conn, error) {
+			c, err := db.Acquire(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return c.Conn(), nil
+		},
+	}
+	notifyCh := make(chan MessageID)
+	listener.Handle("new_events", pgxlisten.HandlerFunc(
+		func(ctx context.Context, notification *pgconn.Notification, conn *pgx.Conn) error {
+			slog.Info("received notification", "payload", notification.Payload)
+			notifyCh <- MessageID(notification.Payload)
+			return nil
+		}),
+	)
+
+	clientMap := make(map[ClientID]chan<- MessageID)
+	go func() {
+		for {
+			select {
+			case messageID := <-notifyCh:
+				slog.Info("broadcasting message", "message_id", messageID)
+				for _, ch := range clientMap {
+					ch <- messageID
+				}
+			case registerReq := <-registerCh:
+				slog.Info("client registered", "client_id", registerReq.ClientID)
+				clientMap[registerReq.ClientID] = registerReq.Ch
+			case clientID := <-unregisterCh:
+				slog.Info("client unregistered", "client_id", clientID)
+				delete(clientMap, clientID)
 			}
 		}
 	}()

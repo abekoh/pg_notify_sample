@@ -6,6 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.1
 	github.com/jackc/pgx/v5 v5.5.5
+	github.com/jackc/pgxlisten v0.0.0-20230728233309-2632bad3185a
 )
 
 require (
