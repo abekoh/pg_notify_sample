@@ -21,14 +21,21 @@ const (
 )
 
 type (
+	RoomID          string
 	ClientID        string
 	MessageID       string
 	RegisterRequest struct {
+		RoomID   RoomID
 		ClientID ClientID
 		Ch       chan<- MessageID
 	}
+	UnregisterRequest struct {
+		RoomID   RoomID
+		ClientID ClientID
+	}
 	NewEventsPayload struct {
 		ID       MessageID `json:"id"`
+		RoomID   RoomID    `json:"room_id"`
 		ClientID ClientID  `json:"client_id"`
 	}
 )
@@ -37,7 +44,7 @@ var (
 	db           *pgxpool.Pool
 	upgrader     = websocket.Upgrader{}
 	registerCh   = make(chan RegisterRequest)
-	unregisterCh = make(chan ClientID)
+	unregisterCh = make(chan UnregisterRequest)
 )
 
 func main() {
@@ -68,6 +75,7 @@ func migrate() error {
 	ctx := context.Background()
 	if _, err := db.Exec(ctx, `CREATE TABLE IF NOT EXISTS events (
 id uuid PRIMARY KEY,
+room_id uuid NOT NULL,
 client_id uuid NOT NULL,
 message jsonb NOT NULL,
 created_at timestamp with time zone DEFAULT now()
@@ -77,7 +85,7 @@ created_at timestamp with time zone DEFAULT now()
 	if _, err := db.Exec(ctx, `CREATE OR REPLACE FUNCTION notify_event() RETURNS TRIGGER AS $$
 DECLARE
 BEGIN
-  PERFORM pg_notify('`+notifyChannel+`', JSON_BUILD_OBJECT('id', NEW.id, 'client_id', NEW.client_id)::text);
+  PERFORM pg_notify('`+notifyChannel+`', JSON_BUILD_OBJECT('id', NEW.id, 'room_id', NEW.room_id, 'client_id', NEW.client_id)::text);
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql`); err != nil {
@@ -101,6 +109,15 @@ func serve() error {
 }
 
 func serveWebSocket(w http.ResponseWriter, r *http.Request) {
+	roomIDStr := r.URL.Query().Get("room_id")
+	if err := uuid.Validate(roomIDStr); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprintf(w, "invalid room_id: %v", err)
+		slog.Warn("invalid room_id", "error", err)
+		return
+	}
+	roomID := RoomID(roomIDStr)
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -113,12 +130,12 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 	slog.Info("client connected", "remote_addr", r.RemoteAddr, "client_id", clientID)
 
 	receiveCh := make(chan MessageID)
-	registerCh <- RegisterRequest{ClientID: clientID, Ch: receiveCh}
+	registerCh <- RegisterRequest{RoomID: roomID, ClientID: clientID, Ch: receiveCh}
 
 	go func() {
 		defer func() {
 			conn.Close()
-			unregisterCh <- clientID
+			unregisterCh <- UnregisterRequest{RoomID: roomID, ClientID: clientID}
 			close(receiveCh)
 			slog.Info("client disconnected", "client_id", clientID)
 		}()
@@ -139,8 +156,8 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			if _, err := db.Exec(context.Background(), `INSERT INTO events (id, client_id, message)
-VALUES ($1, $2, $3)`, uuid.NewString(), clientID, msg); err != nil {
+			if _, err := db.Exec(context.Background(), `INSERT INTO events (id, room_id, client_id, message)
+VALUES ($1, $2, $3, $4)`, uuid.NewString(), roomID, clientID, msg); err != nil {
 				slog.Error("failed to insert event", "error", err)
 				continue
 			}
@@ -195,23 +212,39 @@ func listenAndNotify() error {
 		}
 	}()
 
-	clientMap := make(map[ClientID]chan<- MessageID)
+	listenerMap := make(map[RoomID]map[ClientID]chan<- MessageID)
 	go func() {
 		for {
 			select {
 			case payload := <-notifyCh:
 				slog.Info("notifying clients", "payload", payload)
+				clientMap, ok := listenerMap[payload.RoomID]
+				if !ok {
+					continue
+				}
 				for clientID, ch := range clientMap {
-					if payload.ClientID != clientID {
+					if clientID != payload.ClientID {
 						ch <- payload.ID
 					}
 				}
 			case registerReq := <-registerCh:
-				slog.Info("client registered", "client_id", registerReq.ClientID)
+				slog.Info("client registered", "room_id", registerReq.RoomID, "client_id", registerReq.ClientID)
+				clientMap, ok := listenerMap[registerReq.RoomID]
+				if !ok {
+					listenerMap[registerReq.RoomID] = make(map[ClientID]chan<- MessageID)
+					clientMap = listenerMap[registerReq.RoomID]
+				}
 				clientMap[registerReq.ClientID] = registerReq.Ch
-			case clientID := <-unregisterCh:
-				slog.Info("client unregistered", "client_id", clientID)
-				delete(clientMap, clientID)
+			case unregisterReq := <-unregisterCh:
+				slog.Info("client unregistered", "room_id", unregisterReq.RoomID, "client_id", unregisterReq.ClientID)
+				clientMap, ok := listenerMap[unregisterReq.RoomID]
+				if !ok {
+					continue
+				}
+				delete(clientMap, unregisterReq.ClientID)
+				if len(clientMap) == 0 {
+					delete(listenerMap, unregisterReq.RoomID)
+				}
 			}
 		}
 	}()
