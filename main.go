@@ -45,7 +45,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	broadcast()
+	if err := broadcast(); err != nil {
+		slog.Error("failed to broadcast", "error", err)
+		os.Exit(1)
+	}
 
 	if err := serve(); err != nil {
 		slog.Error("failed to serve", "error", err)
@@ -146,7 +149,7 @@ VALUES ($1, $2)`, uuid.NewString(), msg); err != nil {
 	}()
 }
 
-func broadcast() {
+func broadcast() error {
 	listener := &pgxlisten.Listener{
 		Connect: func(ctx context.Context) (*pgx.Conn, error) {
 			c, err := db.Acquire(ctx)
@@ -164,6 +167,13 @@ func broadcast() {
 			return nil
 		}),
 	)
+
+	go func() {
+		slog.Info("listening for notifications")
+		if err := listener.Listen(context.Background()); err != nil {
+			slog.Error("failed to listen", "error", err)
+		}
+	}()
 
 	clientMap := make(map[ClientID]chan<- MessageID)
 	go func() {
@@ -183,4 +193,5 @@ func broadcast() {
 			}
 		}
 	}()
+	return nil
 }
