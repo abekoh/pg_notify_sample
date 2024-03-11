@@ -202,7 +202,7 @@ func listenAndNotify() error {
 			return c.Conn(), nil
 		},
 	}
-	notifyCh := make(chan NewEventsPayload)
+	notifyCh := make(chan NewEventsPayload, 10)
 	listener.Handle(notifyChannel, pgxlisten.HandlerFunc(
 		func(ctx context.Context, notification *pgconn.Notification, conn *pgx.Conn) error {
 			slog.Debug("received notification", "payload", notification.Payload)

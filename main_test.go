@@ -21,25 +21,33 @@ func TestExecute(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	startCh := make(chan struct{})
+	readyCh := make(chan struct{})
 	resultCh := make(chan int)
 	roomID := uuid.NewString()
 
 	for i := 0; i < readClientNum; i++ {
-		go readClient(t, ctx, roomID, startCh, resultCh)
+		go readClient(t, ctx, roomID, readyCh, resultCh)
+	}
+	readyCount := 0
+	for range readyCh {
+		readyCount++
+		if readyCount == readClientNum {
+			break
+		}
 	}
 	var wg sync.WaitGroup
 	for i := 0; i < writeClientNum; i++ {
 		wg.Add(1)
 		go func() {
-			defer wg.Done()
 			writeClient(t, ctx, roomID, startCh)
+			wg.Done()
 		}()
 	}
 
 	close(startCh)
 
 	wg.Wait()
-	time.Sleep(5 * time.Second)
+	time.Sleep(3 * time.Second)
 	cancel()
 
 	gotCount := 0
@@ -63,7 +71,7 @@ func getConn(t *testing.T, ctx context.Context, roomID string) *websocket.Conn {
 	return conn
 }
 
-func readClient(t *testing.T, ctx context.Context, roomID string, startCh <-chan struct{}, resultCh chan<- int) {
+func readClient(t *testing.T, ctx context.Context, roomID string, readyCh chan<- struct{}, resultCh chan<- int) {
 	t.Helper()
 
 	conn := getConn(t, ctx, roomID)
@@ -72,9 +80,8 @@ func readClient(t *testing.T, ctx context.Context, roomID string, startCh <-chan
 		conn.Close()
 	}()
 
-	<-startCh
-
 	msgCount := 0
+	readyCh <- struct{}{}
 	for {
 		_, _, err := conn.ReadMessage()
 		if err != nil {
