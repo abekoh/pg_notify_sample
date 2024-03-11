@@ -65,6 +65,7 @@ FOR EACH ROW EXECUTE FUNCTION notify_event()`); err != nil {
 
 func serve() error {
 	http.HandleFunc("/ws", serveWebSocket)
+	slog.Info("server started")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		return fmt.Errorf("listen and serve: %w", err)
 	}
@@ -79,8 +80,9 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 		slog.Error("failed to upgrade connection", "error", err)
 		return
 	}
-	defer conn.Close()
+	slog.Info("client connected", "remote_addr", r.RemoteAddr)
 	go func() {
+		defer conn.Close()
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -89,13 +91,17 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 				}
 				break
 			}
-			var msgJSON []byte
-			if err := json.Unmarshal(msg, &msgJSON); err != nil {
+
+			slog.Info("received message", "message", string(msg))
+
+			var data any
+			if err := json.Unmarshal(msg, &data); err != nil {
 				slog.Error("failed to unmarshal message", "error", err)
 				continue
 			}
+
 			if _, err := db.Exec(context.Background(), `INSERT INTO events (id, message)
-VALUES ($1, $2)`, uuid.NewString(), string(msgJSON)); err != nil {
+VALUES ($1, $2)`, uuid.NewString(), msg); err != nil {
 				slog.Error("failed to insert event", "error", err)
 				continue
 			}
