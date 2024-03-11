@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 
+	_ "net/http/pprof"
+
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
@@ -133,8 +135,11 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 	receiveCh := make(chan MessageID)
 	registerCh <- RegisterRequest{RoomID: roomID, ClientID: clientID, Ch: receiveCh}
 
+	ctx, cancel := context.WithCancel(r.Context())
+
 	go func() {
 		defer func() {
+			cancel()
 			conn.Close()
 			unregisterCh <- UnregisterRequest{RoomID: roomID, ClientID: clientID}
 			close(receiveCh)
@@ -157,7 +162,7 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			if _, err := db.Exec(context.Background(), `INSERT INTO events (id, room_id, client_id, message)
+			if _, err := db.Exec(ctx, `INSERT INTO events (id, room_id, client_id, message)
 VALUES ($1, $2, $3, $4)`, uuid.NewString(), roomID, clientID, msg); err != nil {
 				slog.Error("failed to insert event", "error", err)
 				continue
@@ -166,18 +171,22 @@ VALUES ($1, $2, $3, $4)`, uuid.NewString(), roomID, clientID, msg); err != nil {
 	}()
 	go func() {
 		for {
-			messageID, ok := <-receiveCh
-			if !ok {
-				break
-			}
-			var msg json.RawMessage
-			if err := db.QueryRow(context.Background(), `SELECT message FROM events WHERE id = $1`, messageID).Scan(&msg); err != nil {
-				slog.Error("failed to query event", "error", err)
-				continue
-			}
-			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-				slog.Error("failed to write message", "error", err)
-				break
+			select {
+			case <-ctx.Done():
+				return
+			case messageID, ok := <-receiveCh:
+				if !ok {
+					break
+				}
+				var msg json.RawMessage
+				if err := db.QueryRow(ctx, `SELECT message FROM events WHERE id = $1`, messageID).Scan(&msg); err != nil {
+					slog.Error("failed to query event", "error", err)
+					continue
+				}
+				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+					slog.Error("failed to write message", "error", err)
+					break
+				}
 			}
 		}
 	}()
