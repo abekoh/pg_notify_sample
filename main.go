@@ -16,6 +16,10 @@ import (
 	"github.com/jackc/pgxlisten"
 )
 
+const (
+	notifyChannel = "new_events"
+)
+
 type (
 	ClientID        string
 	MessageID       string
@@ -45,8 +49,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := broadcast(); err != nil {
-		slog.Error("failed to broadcast", "error", err)
+	if err := listenAndNotify(); err != nil {
+		slog.Error("failed to listenAndNotify", "error", err)
 		os.Exit(1)
 	}
 
@@ -60,6 +64,7 @@ func migrate() error {
 	ctx := context.Background()
 	if _, err := db.Exec(ctx, `CREATE TABLE IF NOT EXISTS events (
 id uuid PRIMARY KEY,
+client_id uuid NOT NULL,
 message jsonb NOT NULL,
 created_at timestamp with time zone DEFAULT now()
 )`); err != nil {
@@ -68,7 +73,7 @@ created_at timestamp with time zone DEFAULT now()
 	if _, err := db.Exec(ctx, `CREATE OR REPLACE FUNCTION notify_event() RETURNS TRIGGER AS $$
 DECLARE
 BEGIN
-  PERFORM pg_notify('new_events', NEW.id::text);
+  PERFORM pg_notify('`+notifyChannel+`', NEW.id::text);
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql`); err != nil {
@@ -149,7 +154,7 @@ VALUES ($1, $2)`, uuid.NewString(), msg); err != nil {
 	}()
 }
 
-func broadcast() error {
+func listenAndNotify() error {
 	listener := &pgxlisten.Listener{
 		Connect: func(ctx context.Context) (*pgx.Conn, error) {
 			c, err := db.Acquire(ctx)
@@ -160,7 +165,7 @@ func broadcast() error {
 		},
 	}
 	notifyCh := make(chan MessageID)
-	listener.Handle("new_events", pgxlisten.HandlerFunc(
+	listener.Handle(notifyChannel, pgxlisten.HandlerFunc(
 		func(ctx context.Context, notification *pgconn.Notification, conn *pgx.Conn) error {
 			slog.Info("received notification", "payload", notification.Payload)
 			notifyCh <- MessageID(notification.Payload)
