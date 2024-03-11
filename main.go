@@ -146,7 +146,11 @@ VALUES ($1, $2, $3)`, uuid.NewString(), clientID, msg); err != nil {
 			close(receiveCh)
 		}()
 		for {
-			messageID := <-receiveCh
+			messageID, ok := <-receiveCh
+			if !ok {
+				slog.Info("receive channel closed")
+				break
+			}
 			var msg json.RawMessage
 			if err := db.QueryRow(context.Background(), `SELECT message FROM events WHERE id = $1`, messageID).Scan(&msg); err != nil {
 				slog.Error("failed to query event", "error", err)
@@ -206,7 +210,10 @@ func listenAndNotify() error {
 				clientMap[registerReq.ClientID] = registerReq.Ch
 			case clientID := <-unregisterCh:
 				slog.Info("client unregistered", "client_id", clientID)
-				delete(clientMap, clientID)
+				if ch, ok := clientMap[clientID]; ok {
+					close(ch)
+					delete(clientMap, clientID)
+				}
 			}
 		}
 	}()
