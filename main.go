@@ -141,8 +141,8 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			cancel()
 			conn.Close()
-			unregisterCh <- UnregisterRequest{RoomID: roomID, ClientID: clientID}
 			close(receiveCh)
+			unregisterCh <- UnregisterRequest{RoomID: roomID, ClientID: clientID}
 			slog.Info("client disconnected", "client_id", clientID)
 		}()
 		for {
@@ -234,7 +234,10 @@ func listenAndNotify() error {
 				}
 				for clientID, ch := range clientMap {
 					if clientID != payload.ClientID {
-						ch <- payload.ID
+						select {
+						case ch <- payload.ID:
+						default:
+						}
 					}
 				}
 			case registerReq := <-registerCh:
