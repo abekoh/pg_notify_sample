@@ -112,8 +112,16 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 	clientID := ClientID(uuid.NewString())
 	slog.Info("client connected", "remote_addr", r.RemoteAddr, "client_id", clientID)
 
+	receiveCh := make(chan MessageID)
+	registerCh <- RegisterRequest{ClientID: clientID, Ch: receiveCh}
+
 	go func() {
-		defer conn.Close()
+		defer func() {
+			conn.Close()
+			unregisterCh <- clientID
+			close(receiveCh)
+			slog.Info("client disconnected", "client_id", clientID)
+		}()
 		for {
 			_, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -139,16 +147,9 @@ VALUES ($1, $2, $3)`, uuid.NewString(), clientID, msg); err != nil {
 		}
 	}()
 	go func() {
-		receiveCh := make(chan MessageID)
-		registerCh <- RegisterRequest{ClientID: clientID, Ch: receiveCh}
-		defer func() {
-			unregisterCh <- clientID
-			close(receiveCh)
-		}()
 		for {
 			messageID, ok := <-receiveCh
 			if !ok {
-				slog.Info("receive channel closed")
 				break
 			}
 			var msg json.RawMessage
@@ -210,10 +211,7 @@ func listenAndNotify() error {
 				clientMap[registerReq.ClientID] = registerReq.Ch
 			case clientID := <-unregisterCh:
 				slog.Info("client unregistered", "client_id", clientID)
-				if ch, ok := clientMap[clientID]; ok {
-					close(ch)
-					delete(clientMap, clientID)
-				}
+				delete(clientMap, clientID)
 			}
 		}
 	}()
