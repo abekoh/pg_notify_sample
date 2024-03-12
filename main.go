@@ -134,7 +134,7 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 	clientID := ClientID(uuid.NewString())
 	slog.Info("client connected", "remote_addr", r.RemoteAddr, "client_id", clientID)
 
-	receiveCh := make(chan MessageID)
+	receiveCh := make(chan MessageID, 10)
 	registerCh <- RegisterRequest{RoomID: roomID, ClientID: clientID, Ch: receiveCh}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -167,7 +167,7 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			if _, err := db.Exec(ctx, `INSERT INTO events (id, room_id, client_id, message)
 VALUES ($1, $2, $3, $4)`, msgID, roomID, clientID, msg); err != nil {
-				slog.Error("failed to insert event", "error", err)
+				slog.Error("failed to insert event", "error", err, "message_id", msgID, "client_id", clientID, "room_id", roomID)
 				continue
 			}
 		}
@@ -183,12 +183,12 @@ VALUES ($1, $2, $3, $4)`, msgID, roomID, clientID, msg); err != nil {
 				}
 				var msg json.RawMessage
 				if err := db.QueryRow(ctx, `SELECT message FROM events WHERE id = $1`, messageID).Scan(&msg); err != nil {
-					slog.Error("failed to query event", "error", err)
+					slog.Error("failed to query event", "error", err, "message_id", messageID, "client_id", clientID, "room_id", roomID)
 					continue
 				}
 				slog.Debug("read message", "message_id", messageID, "client_id", clientID, "room_id", roomID)
 				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-					slog.Error("failed to write message", "error", err)
+					slog.Error("failed to write message", "error", err, "message_id", messageID, "client_id", clientID, "room_id", roomID)
 					break
 				}
 			}
@@ -240,6 +240,7 @@ func listenAndNotify() error {
 						select {
 						case ch <- payload.ID:
 						default:
+							slog.Warn("failed to notify message", "message_id", payload.ID, "client_id", clientID, "room_id", payload.RoomID)
 						}
 					}
 				}
