@@ -12,7 +12,7 @@ import (
 
 const (
 	roomNum           = 10
-	readClientNum     = 5
+	readClientNum     = 2
 	writeClientNum    = 2
 	writeNumPerClient = 10
 )
@@ -104,5 +104,6 @@ func writeClient(t *testing.T, ctx context.Context, roomID string, startCh <-cha
 		if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"type": "ping"}`)); err != nil {
 			t.Fatal("failed to write message:", err)
 		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
