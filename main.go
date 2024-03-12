@@ -51,6 +51,8 @@ var (
 )
 
 func main() {
+	slog.SetLogLoggerLevel(slog.LevelDebug)
+
 	dbPool, err := pgxpool.New(context.Background(), "postgres://postgres@localhost:5432")
 	if err != nil {
 		slog.Error("failed to connect to database", "error", err)
@@ -154,16 +156,17 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 
-			slog.Debug("received message", "message", string(msg))
-
 			var data any
 			if err := json.Unmarshal(msg, &data); err != nil {
 				slog.Error("failed to unmarshal message", "error", err)
 				continue
 			}
 
+			msgID := MessageID(uuid.NewString())
+			slog.Debug("write message", "message_id", msgID, "client_id", clientID, "room_id", roomID)
+
 			if _, err := db.Exec(ctx, `INSERT INTO events (id, room_id, client_id, message)
-VALUES ($1, $2, $3, $4)`, uuid.NewString(), roomID, clientID, msg); err != nil {
+VALUES ($1, $2, $3, $4)`, msgID, roomID, clientID, msg); err != nil {
 				slog.Error("failed to insert event", "error", err)
 				continue
 			}
@@ -183,6 +186,7 @@ VALUES ($1, $2, $3, $4)`, uuid.NewString(), roomID, clientID, msg); err != nil {
 					slog.Error("failed to query event", "error", err)
 					continue
 				}
+				slog.Debug("read message", "message_id", messageID, "client_id", clientID, "room_id", roomID)
 				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 					slog.Error("failed to write message", "error", err)
 					break
@@ -205,7 +209,6 @@ func listenAndNotify() error {
 	notifyCh := make(chan NewEventsPayload, 10)
 	listener.Handle(notifyChannel, pgxlisten.HandlerFunc(
 		func(ctx context.Context, notification *pgconn.Notification, conn *pgx.Conn) error {
-			slog.Debug("received notification", "payload", notification.Payload)
 			var payload NewEventsPayload
 			if err := json.Unmarshal([]byte(notification.Payload), &payload); err != nil {
 				return fmt.Errorf("unmarshal payload: %w", err)
@@ -227,7 +230,7 @@ func listenAndNotify() error {
 		for {
 			select {
 			case payload := <-notifyCh:
-				slog.Info("notifying clients", "payload", payload)
+				slog.Info("notify message", "message_id", payload.ID, "client_id", payload.ClientID, "room_id", payload.RoomID)
 				clientMap, ok := listenerMap[payload.RoomID]
 				if !ok {
 					continue
@@ -241,7 +244,7 @@ func listenAndNotify() error {
 					}
 				}
 			case registerReq := <-registerCh:
-				slog.Info("client registered", "room_id", registerReq.RoomID, "client_id", registerReq.ClientID)
+				slog.Info("client registered", "client_id", registerReq.ClientID, "room_id", registerReq.RoomID)
 				clientMap, ok := listenerMap[registerReq.RoomID]
 				if !ok {
 					listenerMap[registerReq.RoomID] = make(map[ClientID]chan<- MessageID)
@@ -249,7 +252,7 @@ func listenAndNotify() error {
 				}
 				clientMap[registerReq.ClientID] = registerReq.Ch
 			case unregisterReq := <-unregisterCh:
-				slog.Info("client unregistered", "room_id", unregisterReq.RoomID, "client_id", unregisterReq.ClientID)
+				slog.Info("client unregistered", "client_id", unregisterReq.ClientID, "room_id", unregisterReq.RoomID)
 				clientMap, ok := listenerMap[unregisterReq.RoomID]
 				if !ok {
 					continue
