@@ -134,7 +134,7 @@ func serveWebSocket(w http.ResponseWriter, r *http.Request) {
 	clientID := ClientID(uuid.NewString())
 	slog.Info("client connected", "remote_addr", r.RemoteAddr, "client_id", clientID)
 
-	receiveCh := make(chan MessageID, 10)
+	receiveCh := make(chan MessageID, 100)
 	registerCh <- RegisterRequest{RoomID: roomID, ClientID: clientID, Ch: receiveCh}
 
 	ctx, cancel := context.WithCancel(context.Background())
