@@ -105,7 +105,7 @@ FOR EACH ROW EXECUTE FUNCTION notify_event()`); err != nil {
 }
 
 func serve() error {
-	http.HandleFunc("/ws", serveWebSocket)
+	http.HandleFunc("/psql/ws", serveWebSocket)
 	slog.Info("server started")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		return fmt.Errorf("listen and serve: %w", err)

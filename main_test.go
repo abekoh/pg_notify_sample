@@ -64,7 +64,7 @@ func TestExecute(t *testing.T) {
 func getConn(t *testing.T, ctx context.Context, roomID string) *websocket.Conn {
 	t.Helper()
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, "ws://localhost:8080/ws?room_id="+roomID, nil)
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, "ws://localhost:8080/psql/ws?room_id="+roomID, nil)
 	if err != nil {
 		t.Fatal("failed to connect to server:", err)
 	}
