@@ -26,18 +26,18 @@ const (
 type (
 	RoomID          string
 	ClientID        string
-	EventID         string
+	eventID         string
 	RegisterRequest struct {
 		RoomID   RoomID
 		ClientID ClientID
-		Ch       chan<- EventID
+		Ch       chan<- eventID
 	}
 	UnregisterRequest struct {
 		RoomID   RoomID
 		ClientID ClientID
 	}
 	NewEventsPayload struct {
-		ID       EventID  `json:"id"`
+		ID       eventID  `json:"id"`
 		RoomID   RoomID   `json:"room_id"`
 		ClientID ClientID `json:"client_id"`
 	}
@@ -133,7 +133,7 @@ func handlePSQLWebSocket(w http.ResponseWriter, r *http.Request) {
 	clientID := ClientID(uuid.NewString())
 	slog.Info("client connected", "remote_addr", r.RemoteAddr, "client_id", clientID)
 
-	receiveCh := make(chan EventID, 100)
+	receiveCh := make(chan eventID, 100)
 	registerCh <- RegisterRequest{RoomID: roomID, ClientID: clientID, Ch: receiveCh}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -161,12 +161,12 @@ func handlePSQLWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			eventID := EventID(uuid.NewString())
-			slog.Debug("write message", "event_id", eventID, "client_id", clientID, "room_id", roomID)
+			eventID := eventID(uuid.NewString())
+			slog.Debug("write message", "message_id", eventID, "client_id", clientID, "room_id", roomID)
 
 			if _, err := db.Exec(ctx, `INSERT INTO events (id, room_id, client_id, message)
 VALUES ($1, $2, $3, $4)`, eventID, roomID, clientID, msg); err != nil {
-				slog.Error("failed to insert event", "error", err, "event_id", eventID, "client_id", clientID, "room_id", roomID)
+				slog.Error("failed to insert event", "error", err, "message_id", eventID, "client_id", clientID, "room_id", roomID)
 				continue
 			}
 		}
@@ -176,18 +176,18 @@ VALUES ($1, $2, $3, $4)`, eventID, roomID, clientID, msg); err != nil {
 			select {
 			case <-ctx.Done():
 				return
-			case EventID, ok := <-receiveCh:
+			case eventID, ok := <-receiveCh:
 				if !ok {
 					break
 				}
 				var msg json.RawMessage
-				if err := db.QueryRow(ctx, `SELECT message FROM events WHERE id = $1`, EventID).Scan(&msg); err != nil {
-					slog.Error("failed to query event", "error", err, "event_id", EventID, "client_id", clientID, "room_id", roomID)
+				if err := db.QueryRow(ctx, `SELECT message FROM events WHERE id = $1`, eventID).Scan(&msg); err != nil {
+					slog.Error("failed to query event", "error", err, "message_id", eventID, "client_id", clientID, "room_id", roomID)
 					continue
 				}
-				slog.Debug("read message", "event_id", EventID, "client_id", clientID, "room_id", roomID)
+				slog.Debug("read message", "message_id", eventID, "client_id", clientID, "room_id", roomID)
 				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-					slog.Error("failed to write message", "error", err, "event_id", EventID, "client_id", clientID, "room_id", roomID)
+					slog.Error("failed to write message", "error", err, "message_id", eventID, "client_id", clientID, "room_id", roomID)
 					break
 				}
 			}
@@ -232,12 +232,12 @@ func listenAndNotify() error {
 		}
 	}()
 
-	listenerMap := make(map[RoomID]map[ClientID]chan<- EventID)
+	listenerMap := make(map[RoomID]map[ClientID]chan<- eventID)
 	go func() {
 		for {
 			select {
 			case payload := <-notifyCh:
-				slog.Info("notify message", "event_id", payload.ID, "client_id", payload.ClientID, "room_id", payload.RoomID)
+				slog.Info("notify message", "message_id", payload.ID, "client_id", payload.ClientID, "room_id", payload.RoomID)
 				clientMap, ok := listenerMap[payload.RoomID]
 				if !ok {
 					continue
@@ -247,7 +247,7 @@ func listenAndNotify() error {
 						select {
 						case ch <- payload.ID:
 						default:
-							slog.Warn("failed to notify message", "event_id", payload.ID, "client_id", clientID, "room_id", payload.RoomID)
+							slog.Warn("failed to notify message", "message_id", payload.ID, "client_id", clientID, "room_id", payload.RoomID)
 						}
 					}
 				}
@@ -255,7 +255,7 @@ func listenAndNotify() error {
 				slog.Info("client registered", "client_id", registerReq.ClientID, "room_id", registerReq.RoomID)
 				clientMap, ok := listenerMap[registerReq.RoomID]
 				if !ok {
-					listenerMap[registerReq.RoomID] = make(map[ClientID]chan<- EventID)
+					listenerMap[registerReq.RoomID] = make(map[ClientID]chan<- eventID)
 					clientMap = listenerMap[registerReq.RoomID]
 				}
 				clientMap[registerReq.ClientID] = registerReq.Ch
