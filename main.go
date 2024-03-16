@@ -26,18 +26,18 @@ const (
 type (
 	RoomID          string
 	ClientID        string
-	eventID         string
+	EventID         string
 	RegisterRequest struct {
 		RoomID   RoomID
 		ClientID ClientID
-		Ch       chan<- eventID
+		Ch       chan<- EventID
 	}
 	UnregisterRequest struct {
 		RoomID   RoomID
 		ClientID ClientID
 	}
 	NewEventsPayload struct {
-		ID       eventID  `json:"id"`
+		EventID  EventID  `json:"event_id"`
 		RoomID   RoomID   `json:"room_id"`
 		ClientID ClientID `json:"client_id"`
 	}
@@ -90,7 +90,7 @@ created_at timestamp with time zone DEFAULT now()
 	if _, err := db.Exec(ctx, `CREATE OR REPLACE FUNCTION notify_event() RETURNS TRIGGER AS $$
 DECLARE
 BEGIN
-  PERFORM pg_notify('`+notifyChannel+`', JSON_BUILD_OBJECT('id', NEW.id, 'room_id', NEW.room_id, 'client_id', NEW.client_id)::text);
+  PERFORM pg_notify('`+notifyChannel+`', JSON_BUILD_OBJECT('event_id', NEW.event_id, 'room_id', NEW.room_id, 'client_id', NEW.client_id)::text);
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql`); err != nil {
@@ -133,7 +133,7 @@ func handlePSQLWebSocket(w http.ResponseWriter, r *http.Request) {
 	clientID := ClientID(uuid.NewString())
 	slog.Info("client connected", "remote_addr", r.RemoteAddr, "client_id", clientID)
 
-	receiveCh := make(chan eventID, 100)
+	receiveCh := make(chan EventID, 100)
 	registerCh <- RegisterRequest{RoomID: roomID, ClientID: clientID, Ch: receiveCh}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -161,7 +161,7 @@ func handlePSQLWebSocket(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			eventID := eventID(uuid.NewString())
+			eventID := EventID(uuid.NewString())
 			slog.Debug("write message", "message_id", eventID, "client_id", clientID, "room_id", roomID)
 
 			if _, err := db.Exec(ctx, `INSERT INTO events (event_id, room_id, client_id, message)
@@ -232,12 +232,12 @@ func listenAndNotify() error {
 		}
 	}()
 
-	listenerMap := make(map[RoomID]map[ClientID]chan<- eventID)
+	listenerMap := make(map[RoomID]map[ClientID]chan<- EventID)
 	go func() {
 		for {
 			select {
 			case payload := <-notifyCh:
-				slog.Info("notify message", "message_id", payload.ID, "client_id", payload.ClientID, "room_id", payload.RoomID)
+				slog.Info("notify message", "message_id", payload.EventID, "client_id", payload.ClientID, "room_id", payload.RoomID)
 				clientMap, ok := listenerMap[payload.RoomID]
 				if !ok {
 					continue
@@ -245,9 +245,9 @@ func listenAndNotify() error {
 				for clientID, ch := range clientMap {
 					if clientID != payload.ClientID {
 						select {
-						case ch <- payload.ID:
+						case ch <- payload.EventID:
 						default:
-							slog.Warn("failed to notify message", "message_id", payload.ID, "client_id", clientID, "room_id", payload.RoomID)
+							slog.Warn("failed to notify message", "message_id", payload.EventID, "client_id", clientID, "room_id", payload.RoomID)
 						}
 					}
 				}
@@ -255,7 +255,7 @@ func listenAndNotify() error {
 				slog.Info("client registered", "client_id", registerReq.ClientID, "room_id", registerReq.RoomID)
 				clientMap, ok := listenerMap[registerReq.RoomID]
 				if !ok {
-					listenerMap[registerReq.RoomID] = make(map[ClientID]chan<- eventID)
+					listenerMap[registerReq.RoomID] = make(map[ClientID]chan<- EventID)
 					clientMap = listenerMap[registerReq.RoomID]
 				}
 				clientMap[registerReq.ClientID] = registerReq.Ch
