@@ -105,7 +105,7 @@ FOR EACH ROW EXECUTE FUNCTION notify_event()`); err != nil {
 }
 
 func serve() error {
-	http.HandleFunc("/psql/ws", serveWebSocket)
+	http.HandleFunc("/psql/ws", handlePSQLWebSocket)
 	slog.Info("server started")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		return fmt.Errorf("listen and serve: %w", err)
@@ -113,7 +113,7 @@ func serve() error {
 	return nil
 }
 
-func serveWebSocket(w http.ResponseWriter, r *http.Request) {
+func handlePSQLWebSocket(w http.ResponseWriter, r *http.Request) {
 	roomIDStr := strings.ToLower(r.URL.Query().Get("room_id"))
 	if err := uuid.Validate(roomIDStr); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
