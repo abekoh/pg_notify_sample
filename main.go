@@ -138,6 +138,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// Writer
 	go func() {
 		defer func() {
 			cancel()
@@ -171,6 +172,7 @@ VALUES ($1, $2, $3, $4)`, eventID, roomID, clientID, msg); err != nil {
 			}
 		}
 	}()
+	// Reader
 	go func() {
 		for {
 			select {
@@ -225,6 +227,7 @@ func listenAndNotify() error {
 		}),
 	)
 
+	// Listener
 	go func() {
 		slog.Info("listening for notifications")
 		if err := listener.Listen(context.Background()); err != nil {
@@ -233,6 +236,7 @@ func listenAndNotify() error {
 	}()
 
 	listenerMap := make(map[RoomID]map[ClientID]chan<- EventID)
+	// Dispatcher
 	go func() {
 		for {
 			select {
