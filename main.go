@@ -163,11 +163,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 
 			eventID := EventID(uuid.NewString())
-			slog.Debug("write message", "message_id", eventID, "client_id", clientID, "room_id", roomID)
+			slog.Debug("write message", "event_id", eventID, "client_id", clientID, "room_id", roomID)
 
 			if _, err := db.Exec(ctx, `INSERT INTO events (event_id, room_id, client_id, message)
 VALUES ($1, $2, $3, $4)`, eventID, roomID, clientID, msg); err != nil {
-				slog.Error("failed to insert event", "error", err, "message_id", eventID, "client_id", clientID, "room_id", roomID)
+				slog.Error("failed to insert event", "error", err, "event_id", eventID, "client_id", clientID, "room_id", roomID)
 				continue
 			}
 		}
@@ -184,12 +184,12 @@ VALUES ($1, $2, $3, $4)`, eventID, roomID, clientID, msg); err != nil {
 				}
 				var msg json.RawMessage
 				if err := db.QueryRow(ctx, `SELECT message FROM events WHERE event_id = $1`, eventID).Scan(&msg); err != nil {
-					slog.Error("failed to query event", "error", err, "message_id", eventID, "client_id", clientID, "room_id", roomID)
+					slog.Error("failed to query event", "error", err, "event_id", eventID, "client_id", clientID, "room_id", roomID)
 					continue
 				}
-				slog.Debug("read message", "message_id", eventID, "client_id", clientID, "room_id", roomID)
+				slog.Debug("read message", "event_id", eventID, "client_id", clientID, "room_id", roomID)
 				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-					slog.Error("failed to write message", "error", err, "message_id", eventID, "client_id", clientID, "room_id", roomID)
+					slog.Error("failed to write message", "error", err, "event_id", eventID, "client_id", clientID, "room_id", roomID)
 					break
 				}
 			}
@@ -241,7 +241,7 @@ func listenAndNotify() error {
 		for {
 			select {
 			case payload := <-notifyCh:
-				slog.Info("notify message", "message_id", payload.EventID, "client_id", payload.ClientID, "room_id", payload.RoomID)
+				slog.Info("notify message", "event_id", payload.EventID, "client_id", payload.ClientID, "room_id", payload.RoomID)
 				clientMap, ok := listenerMap[payload.RoomID]
 				if !ok {
 					continue
@@ -251,7 +251,7 @@ func listenAndNotify() error {
 						select {
 						case ch <- payload.EventID:
 						default:
-							slog.Warn("failed to notify message", "message_id", payload.EventID, "client_id", clientID, "room_id", payload.RoomID)
+							slog.Warn("failed to notify message", "event_id", payload.EventID, "client_id", clientID, "room_id", payload.RoomID)
 						}
 					}
 				}
