@@ -79,7 +79,7 @@ func main() {
 func migrate() error {
 	ctx := context.Background()
 	if _, err := db.Exec(ctx, `CREATE TABLE IF NOT EXISTS events (
-id uuid PRIMARY KEY,
+event_id uuid PRIMARY KEY,
 room_id uuid NOT NULL,
 client_id uuid NOT NULL,
 message jsonb NOT NULL,
@@ -164,7 +164,7 @@ func handlePSQLWebSocket(w http.ResponseWriter, r *http.Request) {
 			eventID := eventID(uuid.NewString())
 			slog.Debug("write message", "message_id", eventID, "client_id", clientID, "room_id", roomID)
 
-			if _, err := db.Exec(ctx, `INSERT INTO events (id, room_id, client_id, message)
+			if _, err := db.Exec(ctx, `INSERT INTO events (event_id, room_id, client_id, message)
 VALUES ($1, $2, $3, $4)`, eventID, roomID, clientID, msg); err != nil {
 				slog.Error("failed to insert event", "error", err, "message_id", eventID, "client_id", clientID, "room_id", roomID)
 				continue
@@ -181,7 +181,7 @@ VALUES ($1, $2, $3, $4)`, eventID, roomID, clientID, msg); err != nil {
 					break
 				}
 				var msg json.RawMessage
-				if err := db.QueryRow(ctx, `SELECT message FROM events WHERE id = $1`, eventID).Scan(&msg); err != nil {
+				if err := db.QueryRow(ctx, `SELECT message FROM events WHERE event_id = $1`, eventID).Scan(&msg); err != nil {
 					slog.Error("failed to query event", "error", err, "message_id", eventID, "client_id", clientID, "room_id", roomID)
 					continue
 				}
