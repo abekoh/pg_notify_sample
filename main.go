@@ -105,7 +105,7 @@ FOR EACH ROW EXECUTE FUNCTION notify_event()`); err != nil {
 }
 
 func serve() error {
-	http.HandleFunc("/psql/ws", handlePSQLWebSocket)
+	http.HandleFunc("/ws", handleWebSocket)
 	slog.Info("server started")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		return fmt.Errorf("listen and serve: %w", err)
@@ -113,7 +113,7 @@ func serve() error {
 	return nil
 }
 
-func handlePSQLWebSocket(w http.ResponseWriter, r *http.Request) {
+func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	roomID, err := getRoomID(r)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
