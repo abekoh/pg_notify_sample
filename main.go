@@ -55,33 +55,37 @@ var (
 func main() {
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 
-	dbPool, err := pgxpool.New(context.Background(), "postgres://postgres@localhost:5432")
-	if err != nil {
-		slog.Error("failed to connect to database", "error", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := execute(ctx); err != nil {
+		slog.Error("failed to execute", "error", err)
 		os.Exit(1)
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	<-sigCh
+	cancel()
+}
+
+func execute(ctx context.Context) error {
+	dbPool, err := pgxpool.New(ctx, "postgres://postgres@localhost:5432")
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 	db = dbPool
 
-	ctx, cancel := context.WithCancel(context.Background())
 	if err := migrate(ctx); err != nil {
-		slog.Error("failed to migrate database", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to migrate database: %w", err)
 	}
 
 	if err := listenAndNotify(ctx); err != nil {
-		slog.Error("failed to listenAndNotify", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to listenAndNotify: %w", err)
 	}
 
 	if err := serve(ctx); err != nil {
-		slog.Error("failed to serve", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to serve: %w", err)
 	}
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
-	<-stop
-	cancel()
+	return nil
 }
 
 func migrate(ctx context.Context) error {
@@ -120,11 +124,13 @@ func serve(ctx context.Context) error {
 			slog.Error("failed to listen and serve", "error", err)
 		}
 	}()
-	<-ctx.Done()
-	slog.Info("server stopping")
-	if err := srv.Shutdown(context.Background()); err != nil {
-		slog.Error("failed to shutdown server", "error", err)
-	}
+	go func() {
+		<-ctx.Done()
+		slog.Info("server stopping")
+		if err := srv.Shutdown(context.Background()); err != nil {
+			slog.Error("failed to shutdown server", "error", err)
+		}
+	}()
 	return nil
 }
 
