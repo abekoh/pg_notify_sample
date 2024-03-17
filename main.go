@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
 
 	_ "net/http/pprof"
@@ -60,24 +62,29 @@ func main() {
 	}
 	db = dbPool
 
-	if err := migrate(); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := migrate(ctx); err != nil {
 		slog.Error("failed to migrate database", "error", err)
 		os.Exit(1)
 	}
 
-	if err := listenAndNotify(); err != nil {
+	if err := listenAndNotify(ctx); err != nil {
 		slog.Error("failed to listenAndNotify", "error", err)
 		os.Exit(1)
 	}
 
-	if err := serve(); err != nil {
+	if err := serve(ctx); err != nil {
 		slog.Error("failed to serve", "error", err)
 		os.Exit(1)
 	}
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt)
+	<-stop
+	cancel()
 }
 
-func migrate() error {
-	ctx := context.Background()
+func migrate(ctx context.Context) error {
 	if _, err := db.Exec(ctx, `CREATE TABLE IF NOT EXISTS events (
 event_id uuid PRIMARY KEY,
 room_id uuid NOT NULL,
@@ -104,11 +111,19 @@ FOR EACH ROW EXECUTE FUNCTION notify_event()`); err != nil {
 	return nil
 }
 
-func serve() error {
+func serve(ctx context.Context) error {
+	srv := &http.Server{Addr: ":8080"}
 	http.HandleFunc("/ws", handleWebSocket)
 	slog.Info("server started")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
-		return fmt.Errorf("listen and serve: %w", err)
+	go func() {
+		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("failed to listen and serve", "error", err)
+		}
+	}()
+	<-ctx.Done()
+	slog.Info("server stopping")
+	if err := srv.Shutdown(context.Background()); err != nil {
+		slog.Error("failed to shutdown server", "error", err)
 	}
 	return nil
 }
@@ -198,7 +213,7 @@ VALUES ($1, $2, $3, $4)`, eventID, roomID, clientID, msg); err != nil {
 	}()
 }
 
-func listenAndNotify() error {
+func listenAndNotify(ctx context.Context) error {
 	listener := &pgxlisten.Listener{
 		Connect: func(ctx context.Context) (*pgx.Conn, error) {
 			c, err := db.Acquire(ctx)
@@ -233,6 +248,8 @@ func listenAndNotify() error {
 	go func() {
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case payload := <-notifyCh:
 				slog.Info("notify message", "event_id", payload.EventID, "client_id", payload.ClientID, "room_id", payload.RoomID)
 				clientMap, ok := listenerMap[payload.RoomID]
