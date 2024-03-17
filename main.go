@@ -114,13 +114,14 @@ func serve() error {
 }
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	roomID, err := getRoomID(r)
-	if err != nil {
+	roomIDStr := strings.ToLower(r.URL.Query().Get("room_id"))
+	if err := uuid.Validate(roomIDStr); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = fmt.Fprintf(w, "invalid room_id: %v", err)
 		slog.Error("invalid room_id", "error", err)
 		return
 	}
+	roomID := RoomID(roomIDStr)
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -195,14 +196,6 @@ VALUES ($1, $2, $3, $4)`, eventID, roomID, clientID, msg); err != nil {
 			}
 		}
 	}()
-}
-
-func getRoomID(r *http.Request) (RoomID, error) {
-	roomIDStr := strings.ToLower(r.URL.Query().Get("room_id"))
-	if err := uuid.Validate(roomIDStr); err != nil {
-		return "", fmt.Errorf("invalid room_id: %w", err)
-	}
-	return RoomID(roomIDStr), nil
 }
 
 func listenAndNotify() error {
