@@ -179,10 +179,10 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 
 			eventID := EventID(uuid.NewString())
-			slog.Debug("write message", "event_id", eventID, "client_id", clientID, "room_id", roomID)
+			slog.Debug("write event", "event_id", eventID, "client_id", clientID, "room_id", roomID)
 
-			if _, err := db.Exec(ctx, `INSERT INTO events (event_id, room_id, client_id, message)
-VALUES ($1, $2, $3, $4)`, eventID, roomID, clientID, msg); err != nil {
+			if _, err := db.Exec(ctx, `INSERT INTO events (event_id, room_id, client_id, message) VALUES ($1, $2, $3, $4)`,
+				eventID, roomID, clientID, msg); err != nil {
 				slog.Error("failed to insert event", "error", err, "event_id", eventID, "client_id", clientID, "room_id", roomID)
 				continue
 			}
@@ -237,8 +237,8 @@ func listenAndNotify(ctx context.Context) error {
 
 	// Listener
 	go func() {
-		slog.Info("listening for notifications")
-		if err := listener.Listen(context.Background()); err != nil {
+		slog.Info("listening from new_events channel")
+		if err := listener.Listen(ctx); err != nil {
 			slog.Error("failed to listen", "error", err)
 		}
 	}()
@@ -251,7 +251,7 @@ func listenAndNotify(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case payload := <-notifyCh:
-				slog.Info("notify message", "event_id", payload.EventID, "client_id", payload.ClientID, "room_id", payload.RoomID)
+				slog.Info("notify event", "event_id", payload.EventID, "client_id", payload.ClientID, "room_id", payload.RoomID)
 				clientMap, ok := listenerMap[payload.RoomID]
 				if !ok {
 					continue
@@ -261,7 +261,7 @@ func listenAndNotify(ctx context.Context) error {
 						select {
 						case ch <- payload.EventID:
 						default:
-							slog.Warn("failed to notify message", "event_id", payload.EventID, "client_id", clientID, "room_id", payload.RoomID)
+							slog.Warn("failed to send event to client", "event_id", payload.EventID, "client_id", clientID, "room_id", payload.RoomID)
 						}
 					}
 				}
