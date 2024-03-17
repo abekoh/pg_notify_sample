@@ -250,21 +250,6 @@ func listenAndNotify(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return
-			case payload := <-notifyCh:
-				slog.Info("notify event", "event_id", payload.EventID, "client_id", payload.ClientID, "room_id", payload.RoomID)
-				clientMap, ok := roomClientMap[payload.RoomID]
-				if !ok {
-					continue
-				}
-				for clientID, ch := range clientMap {
-					if clientID != payload.ClientID {
-						select {
-						case ch <- payload.EventID:
-						default:
-							slog.Warn("failed to send event to client", "event_id", payload.EventID, "client_id", clientID, "room_id", payload.RoomID)
-						}
-					}
-				}
 			case registerReq := <-registerCh:
 				slog.Info("client registered", "client_id", registerReq.ClientID, "room_id", registerReq.RoomID)
 				clientMap, ok := roomClientMap[registerReq.RoomID]
@@ -282,6 +267,21 @@ func listenAndNotify(ctx context.Context) error {
 				delete(clientMap, unregisterReq.ClientID)
 				if len(clientMap) == 0 {
 					delete(roomClientMap, unregisterReq.RoomID)
+				}
+			case payload := <-notifyCh:
+				slog.Info("notify event", "event_id", payload.EventID, "client_id", payload.ClientID, "room_id", payload.RoomID)
+				clientMap, ok := roomClientMap[payload.RoomID]
+				if !ok {
+					continue
+				}
+				for clientID, ch := range clientMap {
+					if clientID != payload.ClientID {
+						select {
+						case ch <- payload.EventID:
+						default:
+							slog.Warn("failed to send event to client", "event_id", payload.EventID, "client_id", clientID, "room_id", payload.RoomID)
+						}
+					}
 				}
 			}
 		}
