@@ -223,14 +223,14 @@ func listenAndNotify(ctx context.Context) error {
 			return c.Conn(), nil
 		},
 	}
-	notifyCh := make(chan NewEventsPayload, 10)
+	newEventCh := make(chan NewEventsPayload, 10)
 	listener.Handle("new_events", pgxlisten.HandlerFunc(
 		func(ctx context.Context, notification *pgconn.Notification, conn *pgx.Conn) error {
 			var payload NewEventsPayload
 			if err := json.Unmarshal([]byte(notification.Payload), &payload); err != nil {
 				return fmt.Errorf("unmarshal payload: %w", err)
 			}
-			notifyCh <- payload
+			newEventCh <- payload
 			return nil
 		}),
 	)
@@ -268,7 +268,7 @@ func listenAndNotify(ctx context.Context) error {
 				if len(clientMap) == 0 {
 					delete(roomClientMap, unregisterReq.RoomID)
 				}
-			case payload := <-notifyCh:
+			case payload := <-newEventCh:
 				slog.Info("notify event", "event_id", payload.EventID, "client_id", payload.ClientID, "room_id", payload.RoomID)
 				clientMap, ok := roomClientMap[payload.RoomID]
 				if !ok {
