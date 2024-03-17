@@ -11,8 +11,6 @@ import (
 	"os/signal"
 	"strings"
 
-	_ "net/http/pprof"
-
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
