@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	roomNum           = 10
 	readClientNum     = 10
 	writeClientNum    = 10
 	writeNumPerClient = 10
@@ -26,7 +25,7 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
-func TestExecute(t *testing.T) {
+func TestALotOfReadingAndWriting(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	startCh := make(chan struct{})
