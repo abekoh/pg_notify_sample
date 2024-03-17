@@ -243,7 +243,7 @@ func listenAndNotify(ctx context.Context) error {
 		}
 	}()
 
-	listenerMap := make(map[RoomID]map[ClientID]chan<- EventID)
+	roomClientMap := make(map[RoomID]map[ClientID]chan<- EventID)
 	// Dispatcher
 	go func() {
 		for {
@@ -252,7 +252,7 @@ func listenAndNotify(ctx context.Context) error {
 				return
 			case payload := <-notifyCh:
 				slog.Info("notify event", "event_id", payload.EventID, "client_id", payload.ClientID, "room_id", payload.RoomID)
-				clientMap, ok := listenerMap[payload.RoomID]
+				clientMap, ok := roomClientMap[payload.RoomID]
 				if !ok {
 					continue
 				}
@@ -267,21 +267,21 @@ func listenAndNotify(ctx context.Context) error {
 				}
 			case registerReq := <-registerCh:
 				slog.Info("client registered", "client_id", registerReq.ClientID, "room_id", registerReq.RoomID)
-				clientMap, ok := listenerMap[registerReq.RoomID]
+				clientMap, ok := roomClientMap[registerReq.RoomID]
 				if !ok {
-					listenerMap[registerReq.RoomID] = make(map[ClientID]chan<- EventID)
-					clientMap = listenerMap[registerReq.RoomID]
+					roomClientMap[registerReq.RoomID] = make(map[ClientID]chan<- EventID)
+					clientMap = roomClientMap[registerReq.RoomID]
 				}
 				clientMap[registerReq.ClientID] = registerReq.Ch
 			case unregisterReq := <-unregisterCh:
 				slog.Info("client unregistered", "client_id", unregisterReq.ClientID, "room_id", unregisterReq.RoomID)
-				clientMap, ok := listenerMap[unregisterReq.RoomID]
+				clientMap, ok := roomClientMap[unregisterReq.RoomID]
 				if !ok {
 					continue
 				}
 				delete(clientMap, unregisterReq.ClientID)
 				if len(clientMap) == 0 {
-					delete(listenerMap, unregisterReq.RoomID)
+					delete(roomClientMap, unregisterReq.RoomID)
 				}
 			}
 		}
