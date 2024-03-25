@@ -138,7 +138,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	roomID := RoomID(roomIDStr)
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	wsConn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = fmt.Fprintf(w, "failed to upgrade connection: %v", err)
@@ -158,13 +158,13 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer func() {
 			cancel()
-			conn.Close()
+			wsConn.Close()
 			close(receiveCh)
 			unregisterCh <- UnregisterRequest{RoomID: roomID, ClientID: clientID}
 			slog.Info("client disconnected", "client_id", clientID)
 		}()
 		for {
-			_, msg, err := conn.ReadMessage()
+			_, msg, err := wsConn.ReadMessage()
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 					slog.Error("unexpected close error", "error", err)
@@ -204,7 +204,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				slog.Debug("read message", "event_id", eventID, "client_id", clientID, "room_id", roomID)
-				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				if err := wsConn.WriteMessage(websocket.TextMessage, msg); err != nil {
 					slog.Error("failed to write message", "error", err, "event_id", eventID, "client_id", clientID, "room_id", roomID)
 					break
 				}
