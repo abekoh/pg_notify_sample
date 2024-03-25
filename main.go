@@ -95,7 +95,7 @@ created_at timestamp with time zone DEFAULT now()
 	if _, err := db.Exec(ctx, `CREATE OR REPLACE FUNCTION notify_event() RETURNS TRIGGER AS $$
 DECLARE
 BEGIN
-  PERFORM pg_notify('new_events', JSON_BUILD_OBJECT('event_id', NEW.event_id, 'room_id', NEW.room_id, 'client_id', NEW.client_id)::text);
+  PERFORM PG_NOTIFY('new_events', JSON_BUILD_OBJECT('event_id', NEW.event_id, 'room_id', NEW.room_id, 'client_id', NEW.client_id)::text);
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql`); err != nil {
